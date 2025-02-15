@@ -1,0 +1,2 @@
+# UnityAIChater
+这是一个在Unity中实现与AI对话的工具，基于Ollama，需要提前安装好Ollama
