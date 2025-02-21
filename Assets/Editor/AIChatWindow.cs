@@ -150,6 +150,7 @@ public class AIChatWindow : EditorWindow
                 ChatGUIData guiData = new ChatGUIData();
                 chatGUIDic.Add(data.chatId, guiData);
                 OnChatContentChange(data);
+                OllamaRequester.Instance.SendReq("你好", null);
             }
         }
         GUILayout.EndHorizontal();

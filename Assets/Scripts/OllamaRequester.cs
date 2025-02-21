@@ -1,12 +1,15 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
 using System.Text;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 
-public class OllamaRequester : MonoBehaviour
+public class OllamaRequester
 {
     [Serializable]
     public class RequestData
@@ -41,15 +44,25 @@ public class OllamaRequester : MonoBehaviour
     public string[] inputs;
     private int[] context;
 
-    public InputField input;
-    public Button btn;
+    private HttpClient client;
+
+    private static OllamaRequester instance;
+    public static OllamaRequester Instance
+    {
+        get
+        {
+            if(instance == null)
+            {
+                instance = new OllamaRequester();
+                instance.Awake();
+            }
+            return instance;
+        }
+    }
 
     private void Awake()
     {
-        btn.onClick.AddListener(() =>
-        {
-            StartCoroutine(Connect(input.text, null));
-        });
+        client = new HttpClient();
     }
 
     private void Update()
@@ -141,5 +154,61 @@ public class OllamaRequester : MonoBehaviour
         Debug.Log("发送请求...");
         yield return request.SendWebRequest();
         Debug.Log("text==" + request.downloadHandler.text);
+    }
+
+    public void SendReq(string str, Action onRes)
+    {
+        string url = "http://localhost:11434/api/generate"; //ollama端口默认11434
+        RequestData data = new RequestData()
+        {
+            model = "deepseek-r1:1.5b",
+            prompt = str,
+            context = context,
+            stream = true, //建议用流式传输，不然响应比较慢
+            thinking_enabled = false
+        };
+        string json = JsonUtility.ToJson(data);
+        HttpContent content = new StringContent(json);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        Debug.Log("发送请求..");
+        try
+        {
+            client.PostAsync(url, content).ContinueWith(t =>
+            {
+                try
+                {
+                    //不是200则直接报错
+                    HttpResponseMessage msg = t.Result;
+                    if (msg.StatusCode != System.Net.HttpStatusCode.OK)
+                    {
+                        Debug.LogError($"错误！statusCode=={msg.StatusCode}, 错误消息=={msg.Content}");
+                        return;
+                    }
+                    msg.Content.ReadAsStreamAsync().ContinueWith(t =>
+                    {
+                        Task readTask = new Task(() =>
+                        {
+                            StreamReader reader = new StreamReader(t.Result);
+                            string str = "";
+                            while (str != null)
+                            {
+                                str = reader.ReadLine();
+                                Debug.Log("str==" + str);
+                                System.Threading.Thread.Sleep(100);
+                            }
+                        });
+                        readTask.Start();
+                    });
+                }
+                catch(Exception e)
+                {
+                    Debug.LogError(e);
+                }
+            });
+        }
+        catch(Exception e)
+        {
+            Debug.LogError(e);
+        }
     }
 }
