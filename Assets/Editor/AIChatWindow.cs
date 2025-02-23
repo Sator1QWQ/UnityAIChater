@@ -208,6 +208,7 @@ public class AIChatWindow : EditorWindow
         windowHeight = EditorPrefs.GetFloat("AIChatWindow_Height");
     }
 
+    //聊天内容变化时，可用来重置style
     private void OnChatContentChange(ChatData data)
     {
         ChatGUIData gui = chatGUIDic[data.chatId];
@@ -227,5 +228,11 @@ public class AIChatWindow : EditorWindow
             height = size.y;
         }
         gui.style.normal.background = GetTexture((int)size.x, (int)height, color);
+    }
+
+    //接收到响应
+    private void OnResponseData(OllamaRequester.ResponseData data)
+    {
+
     }
 }
