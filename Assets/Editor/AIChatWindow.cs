@@ -5,35 +5,30 @@ using UnityEngine;
 
 public class AIChatWindow : EditorWindow
 {
-    private class ChatData
-    {
-        public int chatId;
-        public bool isMy;
-        public string content;
-    }
-
-    private class ChatGUIData
-    {
-        public GUIStyle style;
-        public Texture2D background;
-    }
-
     private string chatInput;
     private GUIStyle inputStyle;
     private GUIStyle buttonStyle;
     private GUIStyle AIChatTitleStyle;  //ai名字
     private GUIStyle defaultChatStyle;
+    private GUIStyle defaultSessionStyle;
 
     private bool isFistGUI;
     private Vector2 chatContentScrollPos;
     private float windowWidth;
     private float windowHeight;
+    private Vector2 sessionScrollPos;
+
+    private int sessionWindowWidth = 300;
+    private int sessionItemHeight = 40;
 
     private float chatContentMaxWidth = 500;    //聊天内容的最大宽度
+    private int currentSelectSessionId;
+    private int lastSelectSessionId;
+    private ChatSession session;
+    private int sessionId;
 
-    private Dictionary<int, ChatData> chatDic = new Dictionary<int, ChatData>();
-    private Dictionary<int, ChatGUIData> chatGUIDic = new Dictionary<int, ChatGUIData>();
-    private int tempId;
+
+    private Dictionary<int, ChatSession> sessionDic = new Dictionary<int, ChatSession>();
 
     [MenuItem("AI/聊天界面")]
     private static void Create()
@@ -54,6 +49,7 @@ public class AIChatWindow : EditorWindow
     private void OnEnable()
     {
         isFistGUI = false;
+        currentSelectSessionId = 0;
     }
 
     //设置style
@@ -74,6 +70,12 @@ public class AIChatWindow : EditorWindow
         defaultChatStyle.fontSize = 15;
         defaultChatStyle.wordWrap = true;
         defaultChatStyle.alignment = TextAnchor.MiddleRight; //右对齐
+
+        defaultSessionStyle = new GUIStyle(GUI.skin.button);
+        defaultSessionStyle.normal.background = NewTexture(sessionWindowWidth, sessionItemHeight, Color.gray);
+        defaultSessionStyle.active.background = NewTexture(sessionWindowWidth, sessionItemHeight, new Color(207 / 255.0f, 207 / 255.0f, 207 / 255.0f));
+        defaultSessionStyle.margin.bottom = 5;
+        defaultSessionStyle.normal.textColor = Color.black;
     }
 
 
@@ -87,7 +89,14 @@ public class AIChatWindow : EditorWindow
 
         GUILayout.BeginHorizontal();
         DrawSessionPanel();
-        DrawChatContentPanel();
+        if(session != null)
+        {
+            DrawChatContentPanel();
+        }
+        else
+        {
+            GUILayout.Label("需要新增会话...");
+        }
         GUILayout.EndHorizontal();
         SaveAll();
     }
@@ -95,10 +104,40 @@ public class AIChatWindow : EditorWindow
     //绘制左侧会话选择区域
     private void DrawSessionPanel()
     {
-        GUILayout.BeginVertical(GUI.skin.box, GUILayout.Width(300), GUILayout.ExpandHeight(true));
-        GUILayout.Label("功能暂未实现。。");
+        GUILayout.BeginVertical(GUI.skin.box, GUILayout.Width(sessionWindowWidth), GUILayout.ExpandHeight(true));
+        sessionScrollPos = GUILayout.BeginScrollView(sessionScrollPos);
+        foreach(ChatSession session in sessionDic.Values)
+        {
+            DrawSessionItem(session);
+        }
+        
+        GUILayout.EndScrollView();
+        GUILayout.FlexibleSpace();
+        if(GUILayout.Button("新增对话", GUILayout.Height(50)))
+        {
+            CreateSession();
+        }
         GUILayout.EndVertical();
         GUILayout.Space(10);
+    }
+
+    private void DrawSessionItem(ChatSession session)
+    {
+        GUIStyle style;
+        if(session.SessionId == currentSelectSessionId)
+        {
+            style = new GUIStyle(defaultSessionStyle);
+            style.normal.background = NewTexture(sessionWindowWidth, sessionItemHeight, Color.white);
+            style.normal.textColor = Color.black;
+        }
+        else
+        {
+            style = defaultSessionStyle;
+        }
+        if (GUILayout.Button(session.SessionName, style, GUILayout.Height(sessionItemHeight)))
+        {
+            ChangeSession(session.SessionId);
+        }
     }
 
     //绘制对话区域
@@ -115,9 +154,12 @@ public class AIChatWindow : EditorWindow
     private void DrawChatOutputPanel()
     {
         GUILayout.BeginVertical(GUI.skin.box, GUILayout.ExpandWidth(true), GUILayout.Height(500));
-        GUILayout.Label("..");
+        if(session.ChatDic.Count == 0)
+        {
+            GUILayout.Label("对话内容空");
+        }
         chatContentScrollPos = GUILayout.BeginScrollView(chatContentScrollPos);
-        foreach(KeyValuePair<int, ChatData> data in chatDic)
+        foreach(KeyValuePair<int, ChatData> data in session.ChatDic)
         {
             DrawChatItem(data.Value.chatId, data.Value.isMy, data.Value.content);
         }
@@ -138,21 +180,22 @@ public class AIChatWindow : EditorWindow
         {
             if(!string.IsNullOrEmpty(chatInput) && !string.IsNullOrEmpty(chatInput.Trim()))
             {
-                int id = CreateChatID();
-                ChatData data = AddChatData(id, true, chatInput);
+                int id = session.CreateChatId();
+                ChatData data = session.AddChatData(id, true, chatInput);
                 OnChatContentChange(data);
                 int resId = 0;
-                OllamaRequester.Instance.SendReq(chatInput,() =>
+                session.Requester.SendReq(chatInput,() =>
                 {
-                    resId = CreateChatID();
-                    ChatData aiData = AddChatData(resId, false, "");  //此时还没开始回复内容
+                    resId = session.CreateChatId();
+                    ChatData aiData = session.AddChatData(resId, false, "");  //此时还没开始回复内容
                     OnChatContentChange(aiData);
                 }, data =>
                 {
                     string str = data.response;
-                    ChatData aiData = chatDic[resId];
+                    ChatData aiData = session.ChatDic[resId];
                     aiData.content += str;
                     OnChatContentChange(aiData);
+                    RefreshChatOutput();
                 }, RefreshChatOutput).ContinueWith(t => { });
             }
         }
@@ -172,13 +215,13 @@ public class AIChatWindow : EditorWindow
             //字体颜色
             Vector2 size = defaultChatStyle.CalcSize(new GUIContent(content));
             float width = Mathf.Min(size.x, chatContentMaxWidth);
-            GUILayout.TextArea(content, chatGUIDic[id].style, GUILayout.Width(width));
+            GUILayout.TextArea(content, session.ChatGUIDic[id].style, GUILayout.Width(width));
             GUILayout.EndHorizontal();
         }
         else
         {
             GUILayout.Label("AI", AIChatTitleStyle);
-            GUILayout.TextArea(content, chatGUIDic[id].style, GUILayout.Width(500));
+            GUILayout.TextArea(content, session.ChatGUIDic[id].style, GUILayout.Width(500));
         }
         
         GUILayout.EndVertical();
@@ -201,7 +244,7 @@ public class AIChatWindow : EditorWindow
     //聊天内容变化时，可用来重置style
     private void OnChatContentChange(ChatData data)
     {
-        ChatGUIData gui = chatGUIDic[data.chatId];
+        ChatGUIData gui = session.ChatGUIDic[data.chatId];
         gui.style = new GUIStyle(defaultChatStyle);
         Color color;
         if (data.isMy)
@@ -218,21 +261,24 @@ public class AIChatWindow : EditorWindow
             gui.style.alignment = TextAnchor.MiddleLeft;
         }
 
-        Vector2 size = gui.style.CalcSize(new GUIContent(data.content));
-        float height;
-        if (size.x > chatContentMaxWidth)
-        {
-            height = gui.style.CalcHeight(new GUIContent(data.content), chatContentMaxWidth);
-        }
-        else
-        {
-            height = size.y;
-        }
+        Vector2 size = GetContentSize(gui.style, data.content, chatContentMaxWidth);
         Texture2D lastTexture = gui.style.normal.background;
-        gui.style.normal.background = lastTexture == null ? NewTexture((int)size.x, (int)height, color) : ResetTexture(lastTexture, (int)size.x, (int)height, color);
+        gui.style.normal.background = lastTexture == null ? NewTexture((int)size.x, (int)size.y, color) : ResetTexture(lastTexture, (int)size.x, (int)size.y, color);
         Repaint();
     }
 
+    //获得内容的尺寸
+    private Vector2 GetContentSize(GUIStyle style, string content, float maxWidth)
+    {
+        Vector2 size = style.CalcSize(new GUIContent(content));
+        if (size.x > maxWidth)
+        {
+            size.y = style.CalcHeight(new GUIContent(content), maxWidth);
+        }
+        return size;
+    }
+
+    //获取一个新的贴图
     private Texture2D NewTexture(int width, int height, Color color)
     {
         Texture2D texture = new Texture2D(width, height);
@@ -266,30 +312,44 @@ public class AIChatWindow : EditorWindow
         return texture;
     }
 
-    private int CreateChatID()
-    {
-        tempId++;
-        return tempId;
-    }
-
-    private ChatData AddChatData(int chatId, bool isMy, string content)
-    {
-        ChatData data = new ChatData();
-        data.chatId = chatId;
-        data.isMy = isMy;
-        data.content = content;
-        chatDic.Add(chatId, data);
-
-        ChatGUIData gui = new ChatGUIData();
-        chatGUIDic.Add(chatId, gui);
-        return data;
-    }
-
     private void RefreshChatOutput()
     {
-        foreach(ChatData item in chatDic.Values)
+        foreach(ChatData item in session.ChatDic.Values)
         {
             OnChatContentChange(item);
         }
+    }
+
+    private int CreateSessionId()
+    {
+        sessionId++;
+        lastSelectSessionId = sessionId;
+        return sessionId;
+    }
+
+    private void CreateSession()
+    {
+        int id = CreateSessionId();
+        ChatSession session = new ChatSession(id);
+        sessionDic.Add(id, session);
+        this.session = session;
+        currentSelectSessionId = id;
+        session.SetSessionName("会话" + sessionDic.Count);
+    }
+
+    private void ChangeSession(int sessionId)
+    {
+        session = sessionDic[sessionId];
+        if(lastSelectSessionId != 0 && sessionId != lastSelectSessionId)
+        {
+            OnSessionChange(sessionDic[lastSelectSessionId]);
+        }
+        currentSelectSessionId = sessionId;
+        lastSelectSessionId = currentSelectSessionId;
+    }
+
+    private void OnSessionChange(ChatSession lastSession)
+    {
+        lastSession.Requester.CancelReq();
     }
 }

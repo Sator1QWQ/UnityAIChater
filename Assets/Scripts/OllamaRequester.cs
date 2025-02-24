@@ -11,6 +11,24 @@ using UnityEngine.UI;
 
 public class OllamaRequester
 {
+    private enum OperateState
+    {
+        /// <summary>
+        /// 空闲
+        /// </summary>
+        Idle,
+
+        /// <summary>
+        /// 发送消息中
+        /// </summary>
+        Sending,
+        
+        /// <summary>
+        /// 消息返回中
+        /// </summary>
+        Responsing,
+    }
+
     [Serializable]
     public class RequestData
     {
@@ -18,7 +36,6 @@ public class OllamaRequester
         public string prompt;
         public int[] context;
         public bool stream;
-        public bool thinking_enabled;
     }
 
     [Serializable]
@@ -34,27 +51,17 @@ public class OllamaRequester
         public long load_duration;
     }
 
-    private static OllamaRequester instance;
-    public static OllamaRequester Instance
-    {
-        get
-        {
-            if(instance == null)
-            {
-                instance = new OllamaRequester();
-                instance.Init();
-            }
-            return instance;
-        }
-    }
-
-
     private int[] context;
     private HttpClient client;
+    private Stream stream;
+    private StreamReader reader;
+    private OperateState state;
+    private bool isCancel;
 
-    private void Init()
+    public OllamaRequester()
     {
         client = new HttpClient();
+        state = OperateState.Idle;
     }
 
     /// <summary>
@@ -69,16 +76,16 @@ public class OllamaRequester
         string url = "http://localhost:11434/api/generate"; //ollama端口默认11434
         RequestData data = new RequestData()
         {
-            model = "deepseek-r1:7b",
+            model = "deepseek-r1:1.5b",
             prompt = str,
             context = context,
             stream = true, //建议用流式传输，不然响应比较慢
-            thinking_enabled = false
         };
         string json = JsonUtility.ToJson(data);
         HttpContent content = new StringContent(json);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
-        Debug.Log("发送请求..");
+        Debug.Log("发送请求..数据==" + json);
+        state = OperateState.Sending;
         try
         {
             var request = new HttpRequestMessage(HttpMethod.Post, url);
@@ -86,40 +93,83 @@ public class OllamaRequester
             HttpResponseMessage msg = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
             try
             {
+                state = OperateState.Responsing;
+                if(isCancel)
+                {
+                    Debug.Log("请求被取消");
+                    state = OperateState.Idle;
+                    isCancel = false;
+                    return;
+                }
+
                 //不是200则直接报错
                 if (msg.StatusCode != System.Net.HttpStatusCode.OK)
                 {
                     Debug.LogError($"错误！statusCode=={msg.StatusCode}, 错误消息=={msg.Content}");
+                    isCancel = false;
+                    state = OperateState.Idle;
                     return;
                 }
-                Stream stream = await msg.Content.ReadAsStreamAsync();
-
-                StreamReader reader = new StreamReader(stream);
+                stream = await msg.Content.ReadAsStreamAsync();
+                reader = new StreamReader(stream);
                 onResStart?.Invoke();
 
                 while (true)
                 {
+                    if(isCancel)
+                    {
+                        if(reader != null)
+                        {
+                            reader.Dispose();
+                            stream.Dispose();
+                        }
+                        state = OperateState.Idle;
+                        Debug.Log("在生成文本时请求被取消");
+                        isCancel = false;
+                        return;
+                    }
                     string resStr = await reader.ReadLineAsync();
                     Debug.Log("str==" + resStr);
                     ResponseData res = JsonUtility.FromJson<ResponseData>(resStr);
                     onResOnce?.Invoke(res);
                     if (res.done)
                     {
+                        context = res.context;
                         break;
                     }
                 }
                 onResEnd?.Invoke();
                 reader.Dispose();
                 stream.Dispose();
+                state = OperateState.Idle;
+                isCancel = false;
             }
             catch (Exception e)
             {
+                state = OperateState.Idle;
+                isCancel = false;
                 Debug.LogError(e);
             }
         }
         catch(Exception e)
         {
+            state = OperateState.Idle;
+            isCancel = false;
             Debug.LogError(e);
         }
+    }
+
+    /// <summary>
+    /// 取消发送请求
+    /// </summary>
+    public void CancelReq()
+    {
+        if(state == OperateState.Idle)
+        {
+            return;
+        }
+
+        isCancel = true;
+        Debug.Log("准备取消");
     }
 }
