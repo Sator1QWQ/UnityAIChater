@@ -57,7 +57,14 @@ public class OllamaRequester
         client = new HttpClient();
     }
 
-    public async Task SendReq(string str, Action<ResponseData> onResOnce)
+    /// <summary>
+    /// 发送请求
+    /// </summary>
+    /// <param name="str">文本</param>
+    /// <param name="onResStart">返回时调用</param>
+    /// <param name="onResOnce">每次读取到流数据时调用</param>
+    /// <returns></returns>
+    public async Task SendReq(string str, Action onResStart, Action<ResponseData> onResOnce, Action onResEnd)
     {
         string url = "http://localhost:11434/api/generate"; //ollama端口默认11434
         RequestData data = new RequestData()
@@ -74,7 +81,9 @@ public class OllamaRequester
         Debug.Log("发送请求..");
         try
         {
-            HttpResponseMessage msg = await client.PostAsync(url, content);
+            var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Content = content;
+            HttpResponseMessage msg = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
             try
             {
                 //不是200则直接报错
@@ -86,15 +95,22 @@ public class OllamaRequester
                 Stream stream = await msg.Content.ReadAsStreamAsync();
 
                 StreamReader reader = new StreamReader(stream);
-                string resStr = "";
-                while (resStr != null)
+                onResStart?.Invoke();
+
+                while (true)
                 {
-                    resStr = reader.ReadLine();
+                    string resStr = await reader.ReadLineAsync();
                     Debug.Log("str==" + resStr);
                     ResponseData res = JsonUtility.FromJson<ResponseData>(resStr);
                     onResOnce?.Invoke(res);
-                    await Task.Delay(100);
+                    if (res.done)
+                    {
+                        break;
+                    }
                 }
+                onResEnd?.Invoke();
+                reader.Dispose();
+                stream.Dispose();
             }
             catch (Exception e)
             {

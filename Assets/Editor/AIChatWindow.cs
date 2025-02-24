@@ -22,8 +22,7 @@ public class AIChatWindow : EditorWindow
     private GUIStyle inputStyle;
     private GUIStyle buttonStyle;
     private GUIStyle AIChatTitleStyle;  //ai名字
-    private GUIStyle AIChatContentStyle;    //ai内容
-    private GUIStyle MyChatStyle;   //我自己的
+    private GUIStyle defaultChatStyle;
 
     private bool isFistGUI;
     private Vector2 chatContentScrollPos;
@@ -71,14 +70,10 @@ public class AIChatWindow : EditorWindow
         AIChatTitleStyle.fontSize = 13;
         AIChatTitleStyle.fontStyle = FontStyle.Bold;
 
-        AIChatContentStyle = new GUIStyle(GUI.skin.label);
-        AIChatContentStyle.fontSize = 15;
-        AIChatContentStyle.wordWrap = true;
-
-        MyChatStyle = new GUIStyle(GUI.skin.label);
-        MyChatStyle.fontSize = 15;
-        MyChatStyle.wordWrap = true;
-        MyChatStyle.alignment = TextAnchor.MiddleRight; //右对齐
+        defaultChatStyle = new GUIStyle(GUI.skin.label);
+        defaultChatStyle.fontSize = 15;
+        defaultChatStyle.wordWrap = true;
+        defaultChatStyle.alignment = TextAnchor.MiddleRight; //右对齐
     }
 
 
@@ -143,14 +138,22 @@ public class AIChatWindow : EditorWindow
         {
             if(!string.IsNullOrEmpty(chatInput) && !string.IsNullOrEmpty(chatInput.Trim()))
             {
-                ChatData data = new ChatData() { chatId = tempId, isMy = true, content = chatInput };
-                chatDic.Add(data.chatId, data);
-                tempId++;
-
-                ChatGUIData guiData = new ChatGUIData();
-                chatGUIDic.Add(data.chatId, guiData);
+                int id = CreateChatID();
+                ChatData data = AddChatData(id, true, chatInput);
                 OnChatContentChange(data);
-                OllamaRequester.Instance.SendReq("你好", null);
+                int resId = 0;
+                OllamaRequester.Instance.SendReq(chatInput,() =>
+                {
+                    resId = CreateChatID();
+                    ChatData aiData = AddChatData(resId, false, "");  //此时还没开始回复内容
+                    OnChatContentChange(aiData);
+                }, data =>
+                {
+                    string str = data.response;
+                    ChatData aiData = chatDic[resId];
+                    aiData.content += str;
+                    OnChatContentChange(aiData);
+                }, RefreshChatOutput).ContinueWith(t => { });
             }
         }
         GUILayout.EndHorizontal();
@@ -167,7 +170,7 @@ public class AIChatWindow : EditorWindow
             GUILayout.FlexibleSpace();
 
             //字体颜色
-            Vector2 size = MyChatStyle.CalcSize(new GUIContent(content));
+            Vector2 size = defaultChatStyle.CalcSize(new GUIContent(content));
             float width = Mathf.Min(size.x, chatContentMaxWidth);
             GUILayout.TextArea(content, chatGUIDic[id].style, GUILayout.Width(width));
             GUILayout.EndHorizontal();
@@ -175,23 +178,10 @@ public class AIChatWindow : EditorWindow
         else
         {
             GUILayout.Label("AI", AIChatTitleStyle);
-            GUILayout.TextArea(content, AIChatContentStyle, GUILayout.Width(500));
+            GUILayout.TextArea(content, chatGUIDic[id].style, GUILayout.Width(500));
         }
         
         GUILayout.EndVertical();
-    }
-
-    private Texture2D GetTexture(int width, int height, Color color)
-    {
-        Texture2D texture = new Texture2D(width, height);
-        Color[] colors = new Color[width * height];
-        for(int i = 0; i < colors.Length; i++)
-        {
-            colors[i] = color;
-        }
-        texture.SetPixels(colors);
-        texture.Apply();
-        return texture;
     }
 
     private void SaveAll()
@@ -212,10 +202,21 @@ public class AIChatWindow : EditorWindow
     private void OnChatContentChange(ChatData data)
     {
         ChatGUIData gui = chatGUIDic[data.chatId];
-        gui.style = new GUIStyle(MyChatStyle);
-        gui.style.normal.textColor = Color.blue;
-        Color color = Color.white;
-        color.a = 0.7f;
+        gui.style = new GUIStyle(defaultChatStyle);
+        Color color;
+        if (data.isMy)
+        {
+            color = Color.white;
+            color.a = 0.7f;
+            gui.style.normal.textColor = Color.blue;
+        }
+        else
+        {
+            color = Color.white;
+            color.a = 0.7f;
+            gui.style.normal.textColor = new Color(24 / 255.0f, 142 / 255.0f, 0);
+            gui.style.alignment = TextAnchor.MiddleLeft;
+        }
 
         Vector2 size = gui.style.CalcSize(new GUIContent(data.content));
         float height;
@@ -227,12 +228,68 @@ public class AIChatWindow : EditorWindow
         {
             height = size.y;
         }
-        gui.style.normal.background = GetTexture((int)size.x, (int)height, color);
+        Texture2D lastTexture = gui.style.normal.background;
+        gui.style.normal.background = lastTexture == null ? NewTexture((int)size.x, (int)height, color) : ResetTexture(lastTexture, (int)size.x, (int)height, color);
+        Repaint();
     }
 
-    //接收到响应
-    private void OnResponseData(OllamaRequester.ResponseData data)
+    private Texture2D NewTexture(int width, int height, Color color)
     {
+        Texture2D texture = new Texture2D(width, height);
+        Color[] colors = new Color[width * height];
+        for (int i = 0; i < colors.Length; i++)
+        {
+            colors[i] = color;
+        }
+        texture.SetPixels(colors);
+        texture.Apply();
+        return texture;
+    }
 
+    private Texture2D ResetTexture(Texture2D texture, int width, int height, Color color)
+    {
+        Debug.Log("重置贴图");
+        bool isOk = texture.Reinitialize(width, height);
+        if(!isOk)
+        {
+            Debug.LogError("设置贴图尺寸失败！");
+            return null;
+        }
+
+        Color[] colors = new Color[width * height];
+        for (int i = 0; i < colors.Length; i++)
+        {
+            colors[i] = color;
+        }
+        texture.SetPixels(colors);
+        texture.Apply();
+        return texture;
+    }
+
+    private int CreateChatID()
+    {
+        tempId++;
+        return tempId;
+    }
+
+    private ChatData AddChatData(int chatId, bool isMy, string content)
+    {
+        ChatData data = new ChatData();
+        data.chatId = chatId;
+        data.isMy = isMy;
+        data.content = content;
+        chatDic.Add(chatId, data);
+
+        ChatGUIData gui = new ChatGUIData();
+        chatGUIDic.Add(chatId, gui);
+        return data;
+    }
+
+    private void RefreshChatOutput()
+    {
+        foreach(ChatData item in chatDic.Values)
+        {
+            OnChatContentChange(item);
+        }
     }
 }
