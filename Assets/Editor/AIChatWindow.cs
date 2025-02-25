@@ -194,7 +194,7 @@ public class AIChatWindow : EditorWindow
                 ChatData data = session.AddChatData(id, true, chatInput);
                 OnChatContentChange(data);
                 int resId = 0;
-                session.Requester.SendReq(chatInput,() =>
+                session.Requester.SendReq(chatInput, () =>
                 {
                     resId = session.CreateChatId();
                     ChatData aiData = session.AddChatData(resId, false, "");  //此时还没开始回复内容
@@ -214,7 +214,7 @@ public class AIChatWindow : EditorWindow
                         RefreshChatOutput();
                     });
                     t.Start();
-                }).ContinueWith(t => { });
+                });
             }
         }
         GUILayout.EndHorizontal();

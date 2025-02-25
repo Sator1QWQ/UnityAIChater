@@ -9,7 +9,7 @@ using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 
-public class DeepseekRequester
+public class DeepseekRequester : APIRequester
 {
     private enum OperateState
     {
@@ -32,10 +32,8 @@ public class DeepseekRequester
     [Serializable]
     public class RequestData
     {
-        public string id;
         public string model;
         public Message[] messages;
-        public int[] context;
         public bool stream;
     }
 
@@ -70,148 +68,65 @@ public class DeepseekRequester
         public string finish_reason;
     }
 
-    private int[] context;
-    private HttpClient client;
-    private Stream stream;
-    private StreamReader reader;
-    private OperateState state;
-    private bool isCancel;
-    private string apiKey = "sk-5e363a5790154f639004e53ac5eacb30";
-    private string id; //这次会话的id
+    private List<Message> messages;
 
-    public DeepseekRequester()
+    public DeepseekRequester() : base()
     {
-        client = new HttpClient();
-        state = OperateState.Idle;
+        messages = new List<Message>();
     }
 
-    /// <summary>
-    /// 发送请求
-    /// </summary>
-    /// <param name="str">文本</param>
-    /// <param name="onResStart">返回时调用</param>
-    /// <param name="onResOnce">每次读取到流数据时调用</param>
-    /// <returns></returns>
-    public async Task SendReq(string str, Action onResStart, Action<string> onResOnce, Action onResEnd)
+    public override string Url => "https://api.deepseek.com/chat/completions";
+
+    public string APIKey => "sk-5e363a5790154f639004e53ac5eacb30";
+
+    protected override string GetRequestJson(string str)
     {
-        string url = "https://api.deepseek.com/chat/completions";
+        messages.Add(new Message()
+        {
+            role = "user",
+            content = str
+        });
         RequestData data = new RequestData()
         {
-            id = id,
             model = "deepseek-chat",
-            messages = new Message[]
-            {
-                new Message()
-                {
-                    role = "user",
-                    content = str
-                }
-            },
-            context = context,
-            stream = true, //建议用流式传输，不然响应比较慢
+            messages = messages.ToArray(),
+            stream = true
         };
-        
-        try
-        {
-            string json = JsonUtility.ToJson(data);
-            HttpContent content = new StringContent(json);
-            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
-            Debug.Log("发送请求..数据==" + json);
-            state = OperateState.Sending;
-
-            var request = new HttpRequestMessage(HttpMethod.Post, url);
-            request.Headers.Add("Authorization", "Bearer " + apiKey);
-            request.Content = content;
-            HttpResponseMessage msg = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            try
-            {
-                state = OperateState.Responsing;
-                if(isCancel)
-                {
-                    Debug.Log("请求被取消");
-                    state = OperateState.Idle;
-                    isCancel = false;
-                    return;
-                }
-
-                //不是200则直接报错
-                if (msg.StatusCode != System.Net.HttpStatusCode.OK)
-                {
-                    Debug.LogError($"错误！statusCode=={msg.StatusCode}, 错误消息=={msg.Content}");
-                    isCancel = false;
-                    state = OperateState.Idle;
-                    return;
-                }
-                stream = await msg.Content.ReadAsStreamAsync();
-                reader = new StreamReader(stream);
-                onResStart?.Invoke();
-
-                while (true)
-                {
-                    if(isCancel)
-                    {
-                        if(reader != null)
-                        {
-                            reader.Dispose();
-                            stream.Dispose();
-                        }
-                        state = OperateState.Idle;
-                        Debug.Log("在生成文本时请求被取消");
-                        isCancel = false;
-                        return;
-                    }
-                    string resStr = await reader.ReadLineAsync();
-                    
-                    //会读取到空行
-                    if(string.IsNullOrEmpty(resStr))
-                    {
-                        continue;
-                    }
-
-                    string resJson = resStr.Replace("data: ", "");
-
-                    //deepseek结束的条件
-                    if(resJson.Equals("[DONE]"))
-                    {
-                        break;
-                    }
-                    Debug.Log("str==" + resStr);
-                    ResponseData res = JsonUtility.FromJson<ResponseData>(resJson);
-                    id = res.id;
-                    onResOnce?.Invoke(res.choices[0].delta.content);
-                }
-                onResEnd?.Invoke();
-                reader.Dispose();
-                stream.Dispose();
-                state = OperateState.Idle;
-                isCancel = false;
-            }
-            catch (Exception e)
-            {
-                state = OperateState.Idle;
-                isCancel = false;
-                Debug.LogError(e);
-            }
-        }
-        catch(Exception e)
-        {
-            state = OperateState.Idle;
-            isCancel = false;
-            Debug.LogError(e);
-        }
+        string json = JsonUtility.ToJson(data);
+        return json;
     }
 
-    /// <summary>
-    /// 取消发送请求
-    /// </summary>
-    public void CancelReq()
+    protected override DispatchResState DispatchResponse(string resLine)
     {
-        if(state == OperateState.Idle)
+        if(string.IsNullOrEmpty(resLine))
         {
-            return;
+            return DispatchResState.Skip;
         }
 
-        isCancel = true;
-        Debug.Log("准备取消");
+        string resJson = resLine.Replace("data: ", "");
+        if(resJson == "[DONE]")
+        {
+            return DispatchResState.End;
+        }
+
+        return DispatchResState.Running;
+    }
+
+    protected override string GetResponseContent(string resLine)
+    {
+        string resJson = resLine.Replace("data: ", "");
+        ResponseData data = JsonUtility.FromJson<ResponseData>(resJson);
+        string result = data.choices[0].delta.content;
+        messages.Add(new Message()
+        {
+            role = "assistant",
+            content = result
+        });
+        return result;
+    }
+
+    protected override void SetRequestHeaders(HttpRequestMessage message)
+    {
+        message.Headers.Add("Authorization", $"Bearer {APIKey}");
     }
 }
