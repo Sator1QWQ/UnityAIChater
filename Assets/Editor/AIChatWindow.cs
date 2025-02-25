@@ -85,6 +85,7 @@ public class AIChatWindow : EditorWindow
         if(!isFistGUI)
         {
             StyleSetting();
+            LoadSessions();
             isFistGUI = true;
         }
 
@@ -99,7 +100,7 @@ public class AIChatWindow : EditorWindow
             GUILayout.Label("需要新增会话...");
         }
         GUILayout.EndHorizontal();
-        SaveAll();
+        SaveSize();
     }
 
     //绘制左侧会话选择区域
@@ -149,6 +150,14 @@ public class AIChatWindow : EditorWindow
         GUILayout.BeginHorizontal();
         GUILayout.Label("对话框");
         GUILayout.FlexibleSpace();
+        if(GUILayout.Button("保存对话"))
+        {
+            SaveSessions();
+        }
+        if(GUILayout.Button("删除所有会话数据！"))
+        {
+            DeleteAllSessionData();
+        }
         if (GUILayout.Button("刷新界面"))
         {
             RefreshChatOutput();
@@ -192,20 +201,29 @@ public class AIChatWindow : EditorWindow
             {
                 int id = session.CreateChatId();
                 ChatData data = session.AddChatData(id, true, chatInput);
-                OnChatContentChange(data);
-                int resId = 0;
-                session.Requester.SendReq(chatInput, () =>
+                OnChatContentChange(data, session);
+
+                int currentId = currentSelectSessionId;
+                ChatSession tempSession = sessionDic[currentId];
+                int resId = tempSession.CreateChatId();
+                Debug.Log("发送请求..当前发送请求的会话id==" + currentId);
+                tempSession.Requester.SendReq(chatInput, () =>
                 {
-                    resId = session.CreateChatId();
-                    ChatData aiData = session.AddChatData(resId, false, "");  //此时还没开始回复内容
-                    OnChatContentChange(aiData);
+                    ChatData aiData = tempSession.AddChatData(resId, false, "");  //此时还没开始回复内容
+                    OnChatContentChange(aiData, tempSession);
                 }, data =>
                 {
-                    //string str = data.response;
-                    string str = data;
-                    ChatData aiData = session.ChatDic[resId];
-                    aiData.content += str;
-                    OnChatContentChange(aiData);
+                    try
+                    {
+                        string str = data;
+                        ChatData aiData = tempSession.ChatDic[resId];
+                        aiData.content += str;
+                        OnChatContentChange(aiData, tempSession);
+                    }
+                    catch
+                    {
+                        int a = 0;
+                    }
                 }, () =>
                 {
                     Task t = new Task(async () =>
@@ -245,12 +263,26 @@ public class AIChatWindow : EditorWindow
         GUILayout.EndVertical();
     }
 
-    private void SaveAll()
+    private void SaveSize()
     {
         windowWidth = position.width;
         windowHeight = position.height;
         EditorPrefs.SetFloat("AIChatWindow_Width", windowWidth);
         EditorPrefs.SetFloat("AIChatWindow_Height", windowHeight);
+    }
+
+    private void SaveSessions()
+    {
+        EditorPrefs.SetInt("AIChatWindow_SessionId", sessionId);
+        EditorPrefs.SetInt("AIChatWindow_SessionCount", sessionDic.Count);
+        int i = 0;
+        foreach(KeyValuePair<int, ChatSession> pairs in sessionDic)
+        {
+            EditorPrefs.SetInt("AIChatWindow_SessionList_" + i, pairs.Key);
+            pairs.Value.Save();
+            i++;
+        }
+        Debug.Log("会话总数据保存完成");
     }
 
     private void LoadAll()
@@ -259,10 +291,44 @@ public class AIChatWindow : EditorWindow
         windowHeight = EditorPrefs.GetFloat("AIChatWindow_Height");
     }
 
+    private void LoadSessions()
+    {
+        sessionDic = new Dictionary<int, ChatSession>();
+        int count = EditorPrefs.GetInt("AIChatWindow_SessionCount");
+        for(int i = 0; i < count; i++)
+        {
+            int id = EditorPrefs.GetInt("AIChatWindow_SessionList_" + i);
+            ChatSession session = new ChatSession(id, this);
+            session.Load();
+            sessionDic.Add(id, session);
+        }
+        sessionId = EditorPrefs.GetInt("AIChatWindow_SessionId");
+    }
+
+    //清除所有会话数据
+    private void DeleteAllSessionData()
+    {
+        int count = EditorPrefs.GetInt("AIChatWindow_SessionCount");
+        for (int i = 0; i < count; i++)
+        {
+            int id = EditorPrefs.GetInt("AIChatWindow_SessionList_" + i);
+            sessionDic[id].DeleteSaveData();
+        }
+        EditorPrefs.DeleteKey("AIChatWindow_SessionCount");
+        EditorPrefs.DeleteKey("AIChatWindow_SessionId");
+        Debug.Log("全部会话数据删除完成");
+    }
+
     //聊天内容变化时，可用来重置style
-    private void OnChatContentChange(ChatData data)
+    public void OnChatContentChange(ChatData data, ChatSession session)
     {
         ChatGUIData gui = session.ChatGUIDic[data.chatId];
+        RefreshChatGUI(data, gui);
+        Repaint();
+    }
+
+    public void RefreshChatGUI(ChatData data, ChatGUIData gui)
+    {
         gui.style = new GUIStyle(defaultChatStyle);
         Color color;
         if (data.isMy)
@@ -282,7 +348,6 @@ public class AIChatWindow : EditorWindow
         Vector2 size = GetContentSize(gui.style, data.content, chatContentMaxWidth);
         gui.style.normal.background = gui.lastTexture == null ? NewTexture((int)size.x, (int)size.y, color) : ResetTexture(gui.lastTexture, (int)size.x, (int)size.y, color);
         gui.lastTexture = gui.style.normal.background;
-        Repaint();
     }
 
     //获得内容的尺寸
@@ -333,7 +398,7 @@ public class AIChatWindow : EditorWindow
     {
         foreach(ChatData item in session.ChatDic.Values)
         {
-            OnChatContentChange(item);
+            OnChatContentChange(item, session);
         }
     }
 
@@ -347,7 +412,7 @@ public class AIChatWindow : EditorWindow
     private void CreateSession()
     {
         int id = CreateSessionId();
-        ChatSession session = new ChatSession(id);
+        ChatSession session = new ChatSession(id, this);
         sessionDic.Add(id, session);
         this.session = session;
         currentSelectSessionId = id;
@@ -367,6 +432,6 @@ public class AIChatWindow : EditorWindow
 
     private void OnSessionChange(ChatSession lastSession)
     {
-        lastSession.Requester.CancelReq();
+        //lastSession.Requester.CancelReq();
     }
 }

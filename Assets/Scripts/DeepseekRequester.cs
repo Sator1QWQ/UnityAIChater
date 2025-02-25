@@ -117,16 +117,20 @@ public class DeepseekRequester : APIRequester
         string resJson = resLine.Replace("data: ", "");
         ResponseData data = JsonUtility.FromJson<ResponseData>(resJson);
         string result = data.choices[0].delta.content;
-        messages.Add(new Message()
-        {
-            role = "assistant",
-            content = result
-        });
         return result;
     }
 
     protected override void SetRequestHeaders(HttpRequestMessage message)
     {
         message.Headers.Add("Authorization", $"Bearer {APIKey}");
+    }
+
+    protected override void OnResponseEnd(string content)
+    {
+        messages.Add(new Message()
+        {
+            role = "assistant",
+            content = content
+        });
     }
 }

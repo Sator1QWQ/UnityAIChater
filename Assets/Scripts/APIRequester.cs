@@ -42,11 +42,16 @@ public abstract class APIRequester
     private StreamReader reader;
     private OperateState state;
     private bool isCancel;
+    private double timeout = 20;
+    private double tempTime;
+    private DateTime lastTime;
+    private string fullContent;
 
     public APIRequester()
     {
         client = new HttpClient();
         state = OperateState.Idle;
+        fullContent = "";
     }
 
     /// <summary>
@@ -94,8 +99,19 @@ public abstract class APIRequester
                 reader = new StreamReader(stream);
                 onResStart?.Invoke();
 
+                lastTime = DateTime.Now;
+                fullContent = "";
                 while (true)
                 {
+                    double deltaTime = (DateTime.Now - lastTime).TotalSeconds;
+                    tempTime += deltaTime;
+                    if (tempTime >= timeout)
+                    {
+                        Debug.LogError("处理返回的数据超时！");
+                        break;
+                    }
+                    lastTime = DateTime.Now;
+
                     if (isCancel)
                     {
                         if (reader != null)
@@ -121,14 +137,16 @@ public abstract class APIRequester
 
                     Debug.Log("返回数据==" + resStr);
                     string aiChatContent = GetResponseContent(resStr);
-                    OnResponseOnce();
+                    fullContent += aiChatContent;
+                    tempTime = 0;
                     onResOnce?.Invoke(aiChatContent);
                 }
-                onResEnd?.Invoke();
                 reader.Dispose();
                 stream.Dispose();
                 state = OperateState.Idle;
                 isCancel = false;
+                OnResponseEnd(fullContent);
+                onResEnd?.Invoke();
             }
             catch (Exception e)
             {
@@ -196,7 +214,7 @@ public abstract class APIRequester
     protected abstract string GetResponseContent(string resLine);
 
     /// <summary>
-    /// 当处理完数据流的一次数据时调用
+    /// 当处理完所有数据流的数据时调用
     /// </summary>
-    protected virtual void OnResponseOnce() { }
+    protected virtual void OnResponseEnd(string content) { }
 }
