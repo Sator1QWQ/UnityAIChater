@@ -13,7 +13,7 @@ public class ChatData
 public class ChatGUIData
 {
     public GUIStyle style;
-    public Texture2D background;
+    public Texture2D lastTexture;
 }
 
 /// <summary>
@@ -24,7 +24,7 @@ public class ChatSession
     public int SessionId { get; private set; }
     public string SessionName { get; private set; }
     public int[] ContextList { get; private set; }  //上下文
-    public OllamaRequester Requester { get; private set; }
+    public DeepseekRequester Requester { get; private set; }
 
     public Dictionary<int, ChatData> ChatDic { get; private set; }
     public Dictionary<int, ChatGUIData> ChatGUIDic { get; private set; }
@@ -33,7 +33,7 @@ public class ChatSession
     public ChatSession(int sessionId)
     {
         SessionId = sessionId;
-        Requester = new OllamaRequester();
+        Requester = new DeepseekRequester();
         ChatDic = new Dictionary<int, ChatData>();
         ChatGUIDic = new Dictionary<int, ChatGUIData>();
     }

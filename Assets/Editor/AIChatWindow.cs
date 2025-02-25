@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 
@@ -144,7 +145,16 @@ public class AIChatWindow : EditorWindow
     private void DrawChatContentPanel()
     {
         GUILayout.BeginVertical(GUI.skin.box);
+        
+        GUILayout.BeginHorizontal();
         GUILayout.Label("对话框");
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("刷新界面"))
+        {
+            RefreshChatOutput();
+        }
+        GUILayout.EndHorizontal();
+        
         DrawChatOutputPanel();
         DrawChatInputPanel();
         GUILayout.EndVertical();
@@ -191,12 +201,20 @@ public class AIChatWindow : EditorWindow
                     OnChatContentChange(aiData);
                 }, data =>
                 {
-                    string str = data.response;
+                    //string str = data.response;
+                    string str = data;
                     ChatData aiData = session.ChatDic[resId];
                     aiData.content += str;
                     OnChatContentChange(aiData);
-                    RefreshChatOutput();
-                }, RefreshChatOutput).ContinueWith(t => { });
+                }, () =>
+                {
+                    Task t = new Task(async () =>
+                    {
+                        await Task.Delay(100);
+                        RefreshChatOutput();
+                    });
+                    t.Start();
+                }).ContinueWith(t => { });
             }
         }
         GUILayout.EndHorizontal();
@@ -262,8 +280,8 @@ public class AIChatWindow : EditorWindow
         }
 
         Vector2 size = GetContentSize(gui.style, data.content, chatContentMaxWidth);
-        Texture2D lastTexture = gui.style.normal.background;
-        gui.style.normal.background = lastTexture == null ? NewTexture((int)size.x, (int)size.y, color) : ResetTexture(lastTexture, (int)size.x, (int)size.y, color);
+        gui.style.normal.background = gui.lastTexture == null ? NewTexture((int)size.x, (int)size.y, color) : ResetTexture(gui.lastTexture, (int)size.x, (int)size.y, color);
+        gui.lastTexture = gui.style.normal.background;
         Repaint();
     }
 
@@ -294,7 +312,6 @@ public class AIChatWindow : EditorWindow
 
     private Texture2D ResetTexture(Texture2D texture, int width, int height, Color color)
     {
-        Debug.Log("重置贴图");
         bool isOk = texture.Reinitialize(width, height);
         if(!isOk)
         {
