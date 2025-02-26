@@ -63,11 +63,6 @@ public class SCNetRequester : APIRequester
     {
         messages.Add(new Message()
         {
-            role = "system",
-            content = "我会发送代码给你，你需要记住代码，你接下来只能回复\"收到\"，不可以回复其他文字"
-        });
-        messages.Add(new Message()
-        {
             role = "user",
             content = str
         });
@@ -118,5 +113,30 @@ public class SCNetRequester : APIRequester
             role = "assistant",
             content = content
         });
+    }
+
+    protected override string GetRequestJson(string systemStr, List<string> str)
+    {
+        for (int i = 0; i < str.Count; i++)
+        {
+            messages.Add(new Message()
+            {
+                role = "system",
+                content = systemStr
+            });
+            messages.Add(new Message()
+            {
+                role = "user",
+                content = str[i]
+            });
+        }
+        RequestData data = new RequestData()
+        {
+            model = "DeepSeek-R1-Distill-Qwen-32B",
+            messages = messages.ToArray(),
+            stream = true
+        };
+        string json = JsonUtility.ToJson(data);
+        return json;
     }
 }

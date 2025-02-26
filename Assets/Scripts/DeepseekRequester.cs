@@ -133,4 +133,29 @@ public class DeepseekRequester : APIRequester
             content = content
         });
     }
+
+    protected override string GetRequestJson(string systemStr, List<string> strList)
+    {
+        for (int i = 0; i < strList.Count; i++)
+        {
+            messages.Add(new Message()
+            {
+                role = "system",
+                content = systemStr
+            });
+            messages.Add(new Message()
+            {
+                role = "user",
+                content = strList[i]
+            });
+        }
+        RequestData data = new RequestData()
+        {
+            model = "deepseek-chat",
+            messages = messages.ToArray(),
+            stream = true
+        };
+        string json = JsonUtility.ToJson(data);
+        return json;
+    }
 }

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Threading.Tasks;
 using UnityEngine;
 
 public abstract class APIRequester
@@ -61,99 +62,127 @@ public abstract class APIRequester
     /// <param name="onResStart"></param>
     /// <param name="onResOnce">数据流每返回一次调用一次</param>
     /// <param name="onResEnd"></param>
-    public async void SendReq(string str, Action onResStart, Action<string> onResOnce, Action onResEnd)
+    public void SendReq(string str, Action onResStart, Action<string> onResOnce, Action onResEnd)
     {
         try
         {
             string json = GetRequestJson(str);
-            Debug.Log("发送请求..数据==" + json);
-            state = OperateState.Sending;
-            var request = new HttpRequestMessage(HttpMethod.Post, Url);
-            SetRequestHeaders(request);
+            SendJson(json, onResStart, onResOnce, onResEnd);
+        }
+        catch (Exception e)
+        {
+            state = OperateState.Idle;
+            isCancel = false;
+            Debug.LogError(e);
+        }
+    }
 
-            HttpContent content = new StringContent(json);
-            SetHttpContentHeaders(content);
-            request.Content = content;
+    /// <summary>
+    /// 发送多段文字给ai
+    /// </summary>
+    /// <param name="strList"></param>
+    /// <param name="onResStart"></param>
+    /// <param name="onResOnce"></param>
+    /// <param name="onResEnd"></param>
+    public void SendListReq(string systemStr, List<string> strList, Action onResStart, Action<string> onResOnce, Action onResEnd)
+    {
+        try
+        {
+            string json = GetRequestJson(systemStr, strList);
+            SendJson(json, onResStart, onResOnce, onResEnd);
+        }
+        catch (Exception e)
+        {
+            state = OperateState.Idle;
+            isCancel = false;
+            Debug.LogError(e);
+        }
+    }
 
-            HttpResponseMessage msg = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            try
+    private async Task SendJson(string json, Action onResStart, Action<string> onResOnce, Action onResEnd)
+    {
+        Debug.Log("发送请求..数据==" + json);
+        state = OperateState.Sending;
+        var request = new HttpRequestMessage(HttpMethod.Post, Url);
+        SetRequestHeaders(request);
+
+        HttpContent content = new StringContent(json);
+        SetHttpContentHeaders(content);
+        request.Content = content;
+
+        HttpResponseMessage msg = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        try
+        {
+            state = OperateState.Responsing;
+            if (isCancel)
             {
-                state = OperateState.Responsing;
+                Debug.Log("请求被取消");
+                state = OperateState.Idle;
+                isCancel = false;
+                return;
+            }
+
+            //不是200则直接报错
+            if (msg.StatusCode != System.Net.HttpStatusCode.OK)
+            {
+                Debug.LogError($"错误！statusCode=={msg.StatusCode}, 错误消息=={msg.Content}");
+                isCancel = false;
+                state = OperateState.Idle;
+                return;
+            }
+            stream = await msg.Content.ReadAsStreamAsync();
+            reader = new StreamReader(stream);
+            onResStart?.Invoke();
+
+            lastTime = DateTime.Now;
+            fullContent = "";
+            while (true)
+            {
+                double deltaTime = (DateTime.Now - lastTime).TotalSeconds;
+                tempTime += deltaTime;
+                if (tempTime >= timeout)
+                {
+                    Debug.LogError("处理返回的数据超时！");
+                    tempTime = 0;
+                    break;
+                }
+                lastTime = DateTime.Now;
+
                 if (isCancel)
                 {
-                    Debug.Log("请求被取消");
+                    if (reader != null)
+                    {
+                        reader.Dispose();
+                        stream.Dispose();
+                    }
                     state = OperateState.Idle;
+                    Debug.Log("在生成文本时请求被取消");
                     isCancel = false;
                     return;
                 }
-
-                //不是200则直接报错
-                if (msg.StatusCode != System.Net.HttpStatusCode.OK)
+                string resStr = await reader.ReadLineAsync();
+                Debug.Log("返回数据==" + resStr);
+                DispatchResState dispatchState = DispatchResponse(resStr);
+                if (dispatchState == DispatchResState.Skip)
                 {
-                    Debug.LogError($"错误！statusCode=={msg.StatusCode}, 错误消息=={msg.Content}");
-                    isCancel = false;
-                    state = OperateState.Idle;
-                    return;
+                    continue;
                 }
-                stream = await msg.Content.ReadAsStreamAsync();
-                reader = new StreamReader(stream);
-                onResStart?.Invoke();
-
-                lastTime = DateTime.Now;
-                fullContent = "";
-                while (true)
+                else if (dispatchState == DispatchResState.End)
                 {
-                    double deltaTime = (DateTime.Now - lastTime).TotalSeconds;
-                    tempTime += deltaTime;
-                    if (tempTime >= timeout)
-                    {
-                        Debug.LogError("处理返回的数据超时！");
-                        break;
-                    }
-                    lastTime = DateTime.Now;
-
-                    if (isCancel)
-                    {
-                        if (reader != null)
-                        {
-                            reader.Dispose();
-                            stream.Dispose();
-                        }
-                        state = OperateState.Idle;
-                        Debug.Log("在生成文本时请求被取消");
-                        isCancel = false;
-                        return;
-                    }
-                    string resStr = await reader.ReadLineAsync();
-                    DispatchResState dispatchState = DispatchResponse(resStr);
-                    if(dispatchState == DispatchResState.Skip)
-                    {
-                        continue;
-                    }
-                    else if(dispatchState == DispatchResState.End)
-                    {
-                        break;
-                    }
-
-                    Debug.Log("返回数据==" + resStr);
-                    string aiChatContent = GetResponseContent(resStr);
-                    fullContent += aiChatContent;
-                    tempTime = 0;
-                    onResOnce?.Invoke(aiChatContent);
+                    break;
                 }
-                reader.Dispose();
-                stream.Dispose();
-                state = OperateState.Idle;
-                isCancel = false;
-                OnResponseEnd(fullContent);
-                onResEnd?.Invoke();
+
+                string aiChatContent = GetResponseContent(resStr);
+                fullContent += aiChatContent;
+                tempTime = 0;
+                onResOnce?.Invoke(aiChatContent);
             }
-            catch (Exception e)
-            {
-                state = OperateState.Idle;
-                isCancel = false;
-                Debug.LogError(e);
-            }
+            reader.Dispose();
+            stream.Dispose();
+            state = OperateState.Idle;
+            isCancel = false;
+            OnResponseEnd(fullContent);
+            onResEnd?.Invoke();
         }
         catch (Exception e)
         {
@@ -183,6 +212,14 @@ public abstract class APIRequester
     /// <param name="str">对话输入的内容</param>
     /// <returns></returns>
     protected abstract string GetRequestJson(string str);
+
+    /// <summary>
+    /// 生成需要发送的json
+    /// </summary>
+    /// <param name="systemStr">系统提示消息</param>
+    /// <param name="strList">多段内容</param>
+    /// <returns></returns>
+    protected abstract string GetRequestJson(string systemStr, List<string> strList);
 
     /// <summary>
     /// 设置httpContent的头部

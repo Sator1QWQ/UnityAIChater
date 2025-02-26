@@ -27,7 +27,10 @@ public class AIChatWindow : EditorWindow
     private int lastSelectSessionId;
     private ChatSession session;
     private int sessionId;
-
+    private bool isReadingCode;
+    private string codeModeSystemStr = "下面我发送几段代码给你，你需要记住这些代码，得到这些代码后你只需回复收到，不需要回复其他的文字";
+    private string codeModeSystemStr2 = "下面我发几段代码给你，你要记住这些代码，我说“结束发送代码”之前，你只能回复“收到”，不能回复其他任何文字，在我说“结束发送代码”后，你才可以回复其他文字，好现在回复收到";
+    private List<string> codeList;
 
     private Dictionary<int, ChatSession> sessionDic = new Dictionary<int, ChatSession>();
 
@@ -195,44 +198,72 @@ public class AIChatWindow : EditorWindow
         //对话框下方的按钮
         GUILayout.BeginHorizontal();
         GUILayout.FlexibleSpace();
+        if(!isReadingCode)
+        {
+            if (GUILayout.Button("读取代码", buttonStyle, GUILayout.Width(80)))
+            {
+                codeList = new List<string>();
+                isReadingCode = true;
+            }
+        }
+        else
+        {
+            if(GUILayout.Button("结束读取", buttonStyle, GUILayout.Width(80)))
+            {
+                isReadingCode = false;
+                int id = session.CreateChatId();
+                int resChatId = session.CreateChatId();
+                ChatData data = session.AddChatData(id, true, "代码发送");
+                OnChatContentChange(data, session);
+                session.Requester.SendListReq(codeModeSystemStr, codeList, () =>
+                {
+                    ChatData aiData = session.AddChatData(resChatId, false, "");
+                    OnChatContentChange(aiData, session);
+                }, data =>
+                {
+                    string str = data;
+                    ChatData aiData = session.ChatDic[resChatId];
+                    aiData.content += str;
+                    OnChatContentChange(aiData, session);
+                }, null);
+            }
+        }
+        
         if(GUILayout.Button("确定", buttonStyle, GUILayout.Width(80)))
         {
             if(!string.IsNullOrEmpty(chatInput) && !string.IsNullOrEmpty(chatInput.Trim()))
-            {
-                int id = session.CreateChatId();
-                ChatData data = session.AddChatData(id, true, chatInput);
-                OnChatContentChange(data, session);
+            {                
+                if (!isReadingCode)
+                {
+                    int id = session.CreateChatId();
+                    ChatData data = session.AddChatData(id, true, chatInput);
+                    OnChatContentChange(data, session);
+                    int currentId = currentSelectSessionId;
+                    ChatSession tempSession = sessionDic[currentId];
+                    int resChatId = tempSession.CreateChatId();
+                    Debug.Log("发送请求..当前发送请求的会话id==" + currentId);
 
-                int currentId = currentSelectSessionId;
-                ChatSession tempSession = sessionDic[currentId];
-                int resId = tempSession.CreateChatId();
-                Debug.Log("发送请求..当前发送请求的会话id==" + currentId);
-                tempSession.Requester.SendReq(chatInput, () =>
-                {
-                    ChatData aiData = tempSession.AddChatData(resId, false, "");  //此时还没开始回复内容
-                    OnChatContentChange(aiData, tempSession);
-                }, data =>
-                {
-                    try
+                    void OnResStart()
+                    {
+                        ChatData aiData = session.AddChatData(resChatId, false, "");  //此时还没开始回复内容
+                        OnChatContentChange(aiData, session);
+                    }
+
+                    void OnResOnce(string data)
                     {
                         string str = data;
-                        ChatData aiData = tempSession.ChatDic[resId];
+                        ChatData aiData = session.ChatDic[resChatId];
                         aiData.content += str;
-                        OnChatContentChange(aiData, tempSession);
+                        OnChatContentChange(aiData, session);
                     }
-                    catch
-                    {
-                        int a = 0;
-                    }
-                }, () =>
+
+                    tempSession.Requester.SendReq(chatInput, OnResStart, OnResOnce, null);
+                }
+                else
                 {
-                    Task t = new Task(async () =>
-                    {
-                        await Task.Delay(100);
-                        RefreshChatOutput();
-                    });
-                    t.Start();
-                });
+                    Debug.Log("发送代码");
+                    codeList.Add(chatInput);
+                }
             }
         }
         GUILayout.EndHorizontal();
