@@ -8,24 +8,6 @@ using UnityEngine;
 
 public abstract class APIRequester
 {
-    private enum OperateState
-    {
-        /// <summary>
-        /// 空闲
-        /// </summary>
-        Idle,
-
-        /// <summary>
-        /// 发送消息中
-        /// </summary>
-        Sending,
-
-        /// <summary>
-        /// 消息返回中
-        /// </summary>
-        Responsing,
-    }
-
     /// <summary>
     /// 处理返回数据行的状态
     /// </summary>
@@ -34,6 +16,27 @@ public abstract class APIRequester
         Running,    //继续执行
         Skip,   //跳过本次操作
         End,  //处理结束
+    }
+
+    /// <summary>
+    /// 发送模式
+    /// </summary>
+    public enum SendMode
+    {
+        /// <summary>
+        /// 普通聊天
+        /// </summary>
+        Chat,
+
+        /// <summary>
+        /// 上传文件
+        /// </summary>
+        UploadFile,
+
+        /// <summary>
+        /// 上传代码
+        /// </summary>
+        UploadCode,
     }
 
     public abstract string Url { get; }
@@ -46,10 +49,17 @@ public abstract class APIRequester
     private DateTime lastTime;
     private string fullContent;
 
+    protected SendMode sendMode { get; private set; }
+
     public APIRequester()
     {
         client = new HttpClient();
         fullContent = "";
+    }
+
+    public void ChangeSendMode(SendMode mode)
+    {
+        sendMode = mode;
     }
 
     /// <summary>

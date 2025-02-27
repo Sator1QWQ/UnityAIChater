@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Net.Http;
@@ -8,11 +9,35 @@ using UnityEngine;
 /// </summary>
 public class HunyuanRequester : DeepseekRequester
 {
+    [Serializable]
+    private class FileData
+    {
+        public string name;
+        public string url;
+    }
+
     public override string Url => "https://api.hunyuan.cloud.tencent.com/v1/chat/completions";
 
     protected override string APIKey => "sk-U5KBLgzn8lilOTozu11zX5aiyYNnrNtcOiMhoes4eI2Lk3aF";
 
     protected override string Model => "hunyuan-turbo";
+
+    protected override string GetRequestJson(string str)
+    {
+        if(sendMode == SendMode.Chat)
+        {
+            return base.GetRequestJson(str);
+        }
+        else
+        {
+            FileData data = new FileData()
+            {
+                name = "testFile",
+                url = str
+            };
+            return JsonUtility.ToJson(data);
+        }
+    }
 
     protected override string GetRequestJson(string systemStr, List<string> strList)
     {

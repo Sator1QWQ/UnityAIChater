@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -27,7 +28,7 @@ public class AIChatWindow : EditorWindow
     private int lastSelectSessionId;
     private ChatSession session;
     private int sessionId;
-    private bool isReadingCode;
+    private APIRequester.SendMode sendMode;
     private string codeModeSystemStr = "下面我发送几段代码给你，你需要记住这些代码，得到这些代码后你只需回复收到，不需要回复其他的文字";
     private string codeModeSystemStr2 = "下面我发几段代码给你，你要记住这些代码，我说“结束发送代码”之前，你只能回复“收到”，不能回复其他任何文字，在我说“结束发送代码”后，你才可以回复其他文字，好现在回复收到";
     private List<string> codeList;
@@ -198,19 +199,11 @@ public class AIChatWindow : EditorWindow
         //对话框下方的按钮
         GUILayout.BeginHorizontal();
         GUILayout.FlexibleSpace();
-        if(!isReadingCode)
+        if(sendMode == APIRequester.SendMode.UploadCode)
         {
-            if (GUILayout.Button("读取代码", buttonStyle, GUILayout.Width(80)))
+            if (GUILayout.Button("结束读取", buttonStyle, GUILayout.Width(80)))
             {
-                codeList = new List<string>();
-                isReadingCode = true;
-            }
-        }
-        else
-        {
-            if(GUILayout.Button("结束读取", buttonStyle, GUILayout.Width(80)))
-            {
-                isReadingCode = false;
+                session.Requester.ChangeSendMode(APIRequester.SendMode.Chat);
                 int id = session.CreateChatId();
                 int resChatId = session.CreateChatId();
                 ChatData data = session.AddChatData(id, true, "代码发送");
@@ -226,6 +219,33 @@ public class AIChatWindow : EditorWindow
                     aiData.content += str;
                     OnChatContentChange(aiData, session);
                 }, null);
+                sendMode = APIRequester.SendMode.Chat;
+            }
+        }
+        else
+        {
+            if (GUILayout.Button("读取代码", buttonStyle, GUILayout.Width(80)))
+            {
+                codeList = new List<string>();
+                string[] filePaths = Directory.GetFiles(@"E:\UnityProject\2021.3\UnityAIChater\Assets", ".cs");
+                
+
+            }
+            if(sendMode == APIRequester.SendMode.UploadFile)
+            {
+                if(GUILayout.Button("结束上传", buttonStyle, GUILayout.Width(80)))
+                {
+                    session.Requester.ChangeSendMode(APIRequester.SendMode.Chat);
+                    sendMode = APIRequester.SendMode.Chat;
+                }
+            }
+            else
+            {
+                if (GUILayout.Button("上传文件", buttonStyle, GUILayout.Width(80)))
+                {
+                    session.Requester.ChangeSendMode(APIRequester.SendMode.UploadFile);
+                    sendMode = APIRequester.SendMode.UploadFile;
+                }
             }
         }
         
@@ -233,7 +253,7 @@ public class AIChatWindow : EditorWindow
         {
             if(!string.IsNullOrEmpty(chatInput) && !string.IsNullOrEmpty(chatInput.Trim()))
             {                
-                if (!isReadingCode)
+                if (sendMode != APIRequester.SendMode.UploadCode)
                 {
                     int id = session.CreateChatId();
                     ChatData data = session.AddChatData(id, true, chatInput);
@@ -259,7 +279,7 @@ public class AIChatWindow : EditorWindow
 
                     tempSession.Requester.SendReq(chatInput, OnResStart, OnResOnce, null);
                 }
-                else
+                else if(sendMode == APIRequester.SendMode.UploadCode)
                 {
                     Debug.Log("发送代码");
                     codeList.Add(chatInput);
@@ -463,6 +483,6 @@ public class AIChatWindow : EditorWindow
 
     private void OnSessionChange(ChatSession lastSession)
     {
-        //lastSession.Requester.CancelReq();
+
     }
 }
