@@ -34,7 +34,7 @@ public class ChatSession
     public ChatSession(int sessionId, AIChatWindow window)
     {
         SessionId = sessionId;
-        Requester = new DeepseekRequester();
+        Requester = new HunyuanRequester();
         ChatDic = new Dictionary<int, ChatData>();
         ChatGUIDic = new Dictionary<int, ChatGUIData>();
         this.window = window;

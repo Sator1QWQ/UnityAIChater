@@ -41,8 +41,6 @@ public abstract class APIRequester
     private HttpClient client;
     private Stream stream;
     private StreamReader reader;
-    private OperateState state;
-    private bool isCancel;
     private double timeout = 20;
     private double tempTime;
     private DateTime lastTime;
@@ -51,7 +49,6 @@ public abstract class APIRequester
     public APIRequester()
     {
         client = new HttpClient();
-        state = OperateState.Idle;
         fullContent = "";
     }
 
@@ -71,8 +68,6 @@ public abstract class APIRequester
         }
         catch (Exception e)
         {
-            state = OperateState.Idle;
-            isCancel = false;
             Debug.LogError(e);
         }
     }
@@ -93,8 +88,6 @@ public abstract class APIRequester
         }
         catch (Exception e)
         {
-            state = OperateState.Idle;
-            isCancel = false;
             Debug.LogError(e);
         }
     }
@@ -102,7 +95,6 @@ public abstract class APIRequester
     private async Task SendJson(string json, Action onResStart, Action<string> onResOnce, Action onResEnd)
     {
         Debug.Log("发送请求..数据==" + json);
-        state = OperateState.Sending;
         var request = new HttpRequestMessage(HttpMethod.Post, Url);
         SetRequestHeaders(request);
 
@@ -113,21 +105,11 @@ public abstract class APIRequester
         HttpResponseMessage msg = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
         try
         {
-            state = OperateState.Responsing;
-            if (isCancel)
-            {
-                Debug.Log("请求被取消");
-                state = OperateState.Idle;
-                isCancel = false;
-                return;
-            }
-
             //不是200则直接报错
             if (msg.StatusCode != System.Net.HttpStatusCode.OK)
             {
-                Debug.LogError($"错误！statusCode=={msg.StatusCode}, 错误消息=={msg.Content}");
-                isCancel = false;
-                state = OperateState.Idle;
+                string errorContent = await msg.Content.ReadAsStringAsync();
+                Debug.LogError($"错误！statusCode=={msg.StatusCode}, 错误消息=={errorContent}");
                 return;
             }
             stream = await msg.Content.ReadAsStreamAsync();
@@ -148,18 +130,6 @@ public abstract class APIRequester
                 }
                 lastTime = DateTime.Now;
 
-                if (isCancel)
-                {
-                    if (reader != null)
-                    {
-                        reader.Dispose();
-                        stream.Dispose();
-                    }
-                    state = OperateState.Idle;
-                    Debug.Log("在生成文本时请求被取消");
-                    isCancel = false;
-                    return;
-                }
                 string resStr = await reader.ReadLineAsync();
                 Debug.Log("返回数据==" + resStr);
                 DispatchResState dispatchState = DispatchResponse(resStr);
@@ -179,31 +149,13 @@ public abstract class APIRequester
             }
             reader.Dispose();
             stream.Dispose();
-            state = OperateState.Idle;
-            isCancel = false;
             OnResponseEnd(fullContent);
             onResEnd?.Invoke();
         }
         catch (Exception e)
         {
-            state = OperateState.Idle;
-            isCancel = false;
             Debug.LogError(e);
         }
-    }
-
-    /// <summary>
-    /// 取消发送请求
-    /// </summary>
-    public void CancelReq()
-    {
-        if (state == OperateState.Idle)
-        {
-            return;
-        }
-
-        isCancel = true;
-        Debug.Log("准备取消");
     }
 
     /// <summary>

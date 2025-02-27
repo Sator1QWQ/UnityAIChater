@@ -11,24 +11,6 @@ using UnityEngine.UI;
 
 public class DeepseekRequester : APIRequester
 {
-    private enum OperateState
-    {
-        /// <summary>
-        /// 空闲
-        /// </summary>
-        Idle,
-
-        /// <summary>
-        /// 发送消息中
-        /// </summary>
-        Sending,
-        
-        /// <summary>
-        /// 消息返回中
-        /// </summary>
-        Responsing,
-    }
-
     [Serializable]
     public class RequestData
     {
@@ -68,7 +50,7 @@ public class DeepseekRequester : APIRequester
         public string finish_reason;
     }
 
-    private List<Message> messages;
+    protected List<Message> messages;
 
     public DeepseekRequester() : base()
     {
@@ -77,7 +59,9 @@ public class DeepseekRequester : APIRequester
 
     public override string Url => "https://api.deepseek.com/chat/completions";
 
-    public string APIKey => "sk-5e363a5790154f639004e53ac5eacb30";
+    protected virtual string APIKey => "sk-5e363a5790154f639004e53ac5eacb30";
+
+    protected virtual string Model => "deepseek-chat";
 
     protected override string GetRequestJson(string str)
     {
@@ -88,7 +72,7 @@ public class DeepseekRequester : APIRequester
         });
         RequestData data = new RequestData()
         {
-            model = "deepseek-chat",
+            model = Model,
             messages = messages.ToArray(),
             stream = true
         };
@@ -151,7 +135,7 @@ public class DeepseekRequester : APIRequester
         }
         RequestData data = new RequestData()
         {
-            model = "deepseek-chat",
+            model = Model,
             messages = messages.ToArray(),
             stream = true
         };
